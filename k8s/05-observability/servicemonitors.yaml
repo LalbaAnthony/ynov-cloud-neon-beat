@@ -1,0 +1,72 @@
+# Prometheus Operator scrape configs (requires kube-prometheus-stack).
+# The `release: kube-prometheus-stack` label is the default selector used by the
+# bundled Prometheus to pick up ServiceMonitors/PodMonitors.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: matchmaker
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  namespaceSelector: { matchNames: [neon-edge] }
+  selector:
+    matchLabels: { app: matchmaker }
+  endpoints:
+    - { port: metrics, path: /metrics, interval: 15s }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: realtime-gateway
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  namespaceSelector: { matchNames: [neon-edge] }
+  selector:
+    matchLabels: { app: realtime-gateway }
+  endpoints:
+    - { port: metrics, path: /metrics, interval: 15s }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  namespaceSelector: { matchNames: [neon-data] }
+  selector:
+    matchLabels: { app: redis }
+  endpoints:
+    - { port: redis, path: /metrics, interval: 30s }   # via redis_exporter sidecar (9121 mapped through svc if exposed)
+---
+# Game servers are dynamic pods (Agones) -> scrape via PodMonitor on the labels
+# stamped on the pod template (prometheus.io/* annotations + app=neon-beat-back).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: neon-beat-gameservers
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  namespaceSelector: { matchNames: [neon-game] }
+  selector:
+    matchLabels: { app: neon-beat-back }
+  podMetricsEndpoints:
+    - { port: http, path: /metrics, interval: 30s }
+---
+# CouchDB 3.2+ exposes a native Prometheus endpoint (enable in config; default
+# port 17986). Add that port to the headless service to scrape it.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: couchdb
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  namespaceSelector: { matchNames: [neon-data] }
+  selector:
+    matchLabels: { app: couchdb }
+  endpoints:
+    - { port: couchdb, path: /_node/_local/_prometheus, interval: 30s, basicAuth: { username: { name: couchdb-auth, key: username }, password: { name: couchdb-auth, key: password } } }

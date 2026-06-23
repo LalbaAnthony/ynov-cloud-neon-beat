@@ -1,0 +1,78 @@
+# Agones Fleet: a pool of neon-beat-back game servers.
+# ONE GameServer == ONE live game (the backend FSM/SSE hubs/buzzer map are
+# in-memory and single-game). Agones gives us, out of the box:
+#   - on-demand allocation (matchmaker -> GameServerAllocation)
+#   - sticky routing target (allocated address:port for that game)
+#   - health checking + automatic recycling when a game ends (SDK Shutdown)
+#
+# PREREQUISITE (application change, out of scope of this IaC deliverable):
+# the Rust backend must embed the Agones SDK and call Ready()/Health()/
+# Shutdown(). The `agones` sidecar (sdk-server) is injected automatically.
+apiVersion: agones.dev/v1
+kind: Fleet
+metadata:
+  name: neon-beat-back
+  namespace: neon-game
+  labels: { app.kubernetes.io/part-of: neon-beat, tier: game }
+spec:
+  # Replicas here is the BASELINE warm pool; the FleetAutoscaler overrides it.
+  replicas: 50
+  scheduling: Packed   # pack games onto fewer nodes -> cheaper, faster scale-in
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0%   # never drop capacity below desired during rollout
+  template:
+    metadata:
+      labels: { app: neon-beat-back }
+    spec:
+      ports:
+        - name: http
+          portPolicy: Dynamic   # Agones assigns a host port per GameServer
+          containerPort: 8080
+          protocol: TCP
+      health:
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        failureThreshold: 3
+      # Drain: a game lasts up to ~2h; never kill an Allocated server mid-game.
+      # Agones only recycles it after the backend calls SDK Shutdown() at game end.
+      template:
+        metadata:
+          labels: { app: neon-beat-back, tier: game }
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8080"
+            prometheus.io/path: "/metrics"
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10002
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: neon-beat-back
+              image: ghcr.io/neon-beat/neon-beat-back:0.9.0  # built --features couch-store + agones SDK
+              env:
+                - { name: NEON_STORE, value: "couch" }
+                - { name: COUCH_BASE_URL, value: "http://couchdb.neon-data.svc.cluster.local:5984" }
+                - { name: COUCH_DB, value: "neon_beat" }
+                - name: COUCH_USERNAME
+                  valueFrom: { secretKeyRef: { name: couchdb-auth, key: username } }
+                - name: COUCH_PASSWORD
+                  valueFrom: { secretKeyRef: { name: couchdb-auth, key: password } }
+                - { name: PORT, value: "8080" }
+                - { name: RUST_LOG, value: "info,neon_beat_back=info" }
+              resources:
+                # A game is light on CPU; sized for many small servers per node.
+                requests: { cpu: "100m", memory: "192Mi" }
+                limits:   { cpu: "500m", memory: "512Mi" }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: tmp
+              emptyDir: {}

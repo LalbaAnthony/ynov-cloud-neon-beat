@@ -1,0 +1,30 @@
+# PodDisruptionBudgets keep the edge tier available during node drains/upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: realtime-gateway
+  namespace: neon-edge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: realtime-gateway }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: matchmaker
+  namespace: neon-edge
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: matchmaker }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-buzzer
+  namespace: neon-edge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: frontend-buzzer }

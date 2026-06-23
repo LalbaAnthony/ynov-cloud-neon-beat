@@ -1,0 +1,84 @@
+# Redis: game registry (game:<code> -> GameServer addr:port, with TTL) consumed
+# by the matchmaker (writes) and the realtime gateway (reads), plus rate-limit
+# counters. Small, fast, not the source of truth (CouchDB is) -> single primary
+# with one replica is enough here; lost entries only force a re-resolve.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: neon-data
+  labels: { app: redis }
+spec:
+  selector: { app: redis }
+  ports: [{ name: redis, port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: neon-data
+  labels: { app: redis, app.kubernetes.io/part-of: neon-beat, tier: data }
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis, tier: data }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args:
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            - "--maxmemory"
+            - "256mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+            - "--save"
+            - ""               # registry is ephemeral -> no RDB persistence needed
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-auth, key: password } }
+          ports: [{ containerPort: 6379, name: redis }]
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "320Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            tcpSocket: { port: redis }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: redis }
+            periodSeconds: 15
+        # Sidecar exporter so Prometheus can scrape Redis metrics.
+        - name: exporter
+          image: oliver006/redis_exporter:v1.62.0
+          env:
+            - { name: REDIS_ADDR, value: "redis://localhost:6379" }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-auth, key: password } }
+          ports: [{ containerPort: 9121, name: metrics }]
+          resources:
+            requests: { cpu: "10m", memory: "16Mi" }
+            limits:   { cpu: "50m", memory: "64Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 59000
+            capabilities: { drop: ["ALL"] }

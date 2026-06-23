@@ -1,0 +1,55 @@
+# Resource governance per namespace: a ResourceQuota caps total consumption and a
+# LimitRange forces every container to declare requests/limits (prevents a
+# misconfigured pod from starving the cluster). Tune to cluster size.
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: edge-quota, namespace: neon-edge }
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 32Gi
+    limits.cpu: "60"
+    limits.memory: 64Gi
+    pods: "200"
+---
+apiVersion: v1
+kind: LimitRange
+metadata: { name: edge-limits, namespace: neon-edge }
+spec:
+  limits:
+    - type: Container
+      default: { cpu: "500m", memory: 256Mi }
+      defaultRequest: { cpu: "50m", memory: 64Mi }
+---
+# Game tier is the large one (one pod per game). Sized for the peak fleet.
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: game-quota, namespace: neon-game }
+spec:
+  hard:
+    requests.cpu: "500"
+    requests.memory: 900Gi
+    limits.cpu: "2000"
+    limits.memory: 2000Gi
+    pods: "4200"
+---
+apiVersion: v1
+kind: LimitRange
+metadata: { name: game-limits, namespace: neon-game }
+spec:
+  limits:
+    - type: Container
+      default: { cpu: "500m", memory: 512Mi }
+      defaultRequest: { cpu: "100m", memory: 192Mi }
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: data-quota, namespace: neon-data }
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 24Gi
+    limits.cpu: "20"
+    limits.memory: 48Gi
+    persistentvolumeclaims: "10"

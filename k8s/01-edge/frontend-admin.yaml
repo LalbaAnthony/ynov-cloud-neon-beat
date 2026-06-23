@@ -1,0 +1,56 @@
+# Admin SPA (neon-beat-admin-front): game master UI, consumes /sse/admin + /admin/*.
+# Served behind OIDC auth at the ingress (see 04-security). Stateless static server.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-admin
+  namespace: neon-edge
+  labels: { app: frontend-admin, app.kubernetes.io/part-of: neon-beat, tier: edge }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: frontend-admin }
+  template:
+    metadata:
+      labels: { app: frontend-admin, tier: edge }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nginx
+          image: ghcr.io/neon-beat/admin-front:1.0.0   # built from neon-beat-admin-front
+          ports: [{ containerPort: 8080, name: http }]
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits:   { cpu: "150m", memory: "128Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: nginx-conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: nginx-conf
+          configMap: { name: frontend-nginx }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-admin
+  namespace: neon-edge
+  labels: { app: frontend-admin }
+spec:
+  selector: { app: frontend-admin }
+  ports: [{ port: 80, targetPort: http, name: http }]

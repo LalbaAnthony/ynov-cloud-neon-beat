@@ -1,0 +1,29 @@
+# Least-privilege RBAC for the matchmaker: it may ONLY create GameServerAllocation
+# objects in neon-game (to allocate a game server). No other cluster rights.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: matchmaker-allocator
+  namespace: neon-game
+rules:
+  - apiGroups: ["allocation.agones.dev"]
+    resources: ["gameserverallocations"]
+    verbs: ["create"]
+  # Read-only visibility on the fleet for capacity decisions (optional).
+  - apiGroups: ["agones.dev"]
+    resources: ["gameservers", "fleets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: matchmaker-allocator
+  namespace: neon-game
+subjects:
+  - kind: ServiceAccount
+    name: matchmaker
+    namespace: neon-edge
+roleRef:
+  kind: Role
+  name: matchmaker-allocator
+  apiGroup: rbac.authorization.k8s.io

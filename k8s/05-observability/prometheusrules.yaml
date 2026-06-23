@@ -1,0 +1,64 @@
+# Alerting rules covering capacity, real-time health, and data layer.
+# Metric names assume: Agones exposes agones_fleets_replicas_count{...}; the
+# backend exposes neon_buzz_latency_seconds_bucket and neon_db_degraded; the
+# gateway exposes gateway_active_connections / gateway_upstream_errors_total.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: neon-beat-alerts
+  namespace: neon-observability
+  labels: { release: kube-prometheus-stack }
+spec:
+  groups:
+    - name: neon-capacity
+      rules:
+        - alert: AgonesReadyBufferLow
+          # Warm buffer nearly exhausted -> next game-creation burst risks cold start.
+          expr: sum(agones_fleets_replicas_count{type="ready", name="neon-beat-back"}) < 50
+          for: 2m
+          labels: { severity: warning }
+          annotations:
+            summary: "Agones Ready buffer low ({{ $value }} servers)"
+            description: "Increase FleetAutoscaler bufferSize or check Cluster Autoscaler."
+        - alert: AgonesAllocationFailures
+          expr: increase(agones_allocator_allocation_requests_total{status!="Allocated"}[5m]) > 0
+          for: 1m
+          labels: { severity: critical }
+          annotations: { summary: "Game allocation failures detected" }
+        - alert: GameFleetNearMax
+          expr: sum(agones_fleets_replicas_count{type="allocated", name="neon-beat-back"}) > 3600
+          for: 5m
+          labels: { severity: warning }
+          annotations: { summary: "Allocated game servers near fleet max — raise maxReplicas/quota" }
+
+    - name: neon-realtime
+      rules:
+        - alert: BuzzLatencyHighP99
+          expr: histogram_quantile(0.99, sum(rate(neon_buzz_latency_seconds_bucket[5m])) by (le)) > 0.15
+          for: 5m
+          labels: { severity: warning }
+          annotations: { summary: "Buzz p99 latency > 150ms" }
+        - alert: GatewayUpstreamErrors
+          expr: increase(gateway_upstream_errors_total[5m]) > 50
+          for: 2m
+          labels: { severity: critical }
+          annotations: { summary: "Gateway cannot reach game servers (sticky routing broken?)" }
+        - alert: GatewayConnectionsSaturating
+          expr: max(gateway_active_connections) > 13000
+          for: 3m
+          labels: { severity: warning }
+          annotations: { summary: "Gateway pods near MAX_CONNS_PER_POD — HPA should scale out" }
+
+    - name: neon-data
+      rules:
+        - alert: BackendDegradedMode
+          # The backend tolerates DB loss but we must know about it quickly.
+          expr: max(neon_db_degraded) == 1
+          for: 1m
+          labels: { severity: critical }
+          annotations: { summary: "A backend is in DB degraded mode" }
+        - alert: CouchDBNodeDown
+          expr: up{job=~".*couchdb.*"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations: { summary: "A CouchDB node is down — quorum at risk" }

@@ -1,0 +1,62 @@
+# Public display SPA (neon-beat-game-front): consumes /sse/public + /public/*.
+# Stateless static server -> scales freely behind the CDN.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-game
+  namespace: neon-edge
+  labels: { app: frontend-game, app.kubernetes.io/part-of: neon-beat, tier: edge }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: frontend-game }
+  template:
+    metadata:
+      labels: { app: frontend-game, tier: edge }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: frontend-game }
+      containers:
+        - name: nginx
+          image: ghcr.io/neon-beat/game-front:1.0.0   # built from neon-beat-game-front
+          ports: [{ containerPort: 8080, name: http }]
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits:   { cpu: "150m", memory: "128Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: nginx-conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: nginx-conf
+          configMap: { name: frontend-nginx }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-game
+  namespace: neon-edge
+  labels: { app: frontend-game }
+spec:
+  selector: { app: frontend-game }
+  ports: [{ port: 80, targetPort: http, name: http }]

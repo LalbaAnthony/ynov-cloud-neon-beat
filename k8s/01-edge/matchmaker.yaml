@@ -1,0 +1,81 @@
+# Matchmaker / Session API (NEW stateless platform component).
+# Responsibilities:
+#   - POST /games  -> request a GameServerAllocation from Agones, store
+#     game:<code> -> {gsAddress, gsPort, region} in Redis with a TTL.
+#   - GET  /games/<code> -> resolve region/gateway for "join by code".
+# It holds no game state -> scales horizontally with the HPA.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: matchmaker
+  namespace: neon-edge
+  labels: { app: matchmaker, app.kubernetes.io/part-of: neon-beat }
+# RBAC (right to create GameServerAllocation) is granted in 04-security/rbac.yaml.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matchmaker
+  namespace: neon-edge
+  labels: { app: matchmaker, app.kubernetes.io/part-of: neon-beat, tier: edge }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: matchmaker }
+  template:
+    metadata:
+      labels: { app: matchmaker, tier: edge }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: matchmaker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: matchmaker }
+      containers:
+        - name: matchmaker
+          image: ghcr.io/neon-beat/matchmaker:1.0.0
+          ports:
+            - { containerPort: 8080, name: http }
+            - { containerPort: 9090, name: metrics }
+          env:
+            - { name: REGION, value: "eu-west-1" }
+            - { name: AGONES_ALLOCATOR_NS, value: "neon-game" }
+            - { name: AGONES_FLEET, value: "neon-beat-back" }
+            - { name: REDIS_ADDR, value: "redis.neon-data.svc.cluster.local:6379" }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis-auth, key: password } }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: matchmaker
+  namespace: neon-edge
+  labels: { app: matchmaker }
+spec:
+  selector: { app: matchmaker }
+  ports:
+    - { port: 80, targetPort: http, name: http }
+    - { port: 9090, targetPort: metrics, name: metrics }

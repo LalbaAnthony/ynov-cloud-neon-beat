@@ -1,0 +1,50 @@
+# FleetAutoscaler: keeps a warm BUFFER of Ready (un-allocated) game servers so a
+# burst of new games never pays a cold start. This is the key lever for the
+# weekly 15x peak: the buffer absorbs creation spikes while the Cluster
+# Autoscaler adds nodes underneath.
+apiVersion: autoscaling.agones.dev/v1
+kind: FleetAutoscaler
+metadata:
+  name: neon-beat-back
+  namespace: neon-game
+spec:
+  fleetName: neon-beat-back
+  policy:
+    type: Buffer
+    buffer:
+      # Always keep this many Ready servers on top of the Allocated ones.
+      bufferSize: 200
+      minReplicas: 50      # floor (nominal warm capacity)
+      maxReplicas: 4000    # ceiling sized for the ~2-3k concurrent games peak + buffer
+  sync:
+    type: FixedInterval
+    fixedInterval:
+      seconds: 15
+---
+# OPTIONAL scheduled pre-warm for a calendar-known weekly peak (e.g. event night).
+# Pre-scales the buffer BEFORE the rush so neither Agones nor the Cluster
+# Autoscaler are caught cold. Uncomment and tune the schedule to your peak.
+#
+# apiVersion: autoscaling.agones.dev/v1
+# kind: FleetAutoscaler
+# metadata:
+#   name: neon-beat-back-peak
+#   namespace: neon-game
+# spec:
+#   fleetName: neon-beat-back
+#   policy:
+#     type: Schedule
+#     schedule:
+#       between:
+#         start: "2026-06-26T18:00:00Z"
+#         end:   "2026-06-26T23:59:00Z"
+#       activePeriod:
+#         timezone: "Europe/Paris"
+#         startCron: "0 18 * * 5"   # Friday 18:00
+#         duration: "6h"
+#       policy:
+#         type: Buffer
+#         buffer:
+#           bufferSize: 600
+#           minReplicas: 600
+#           maxReplicas: 4000

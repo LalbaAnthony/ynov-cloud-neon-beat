@@ -1,0 +1,121 @@
+# CouchDB 3-node cluster (quorum). Matches the backend's persistence model:
+# debounced writes, optimistic 409 retry, and graceful degraded mode when the DB
+# is briefly unavailable. CouchDB's multi-master replication also enables the
+# cross-region replication of SHARED docs (question sequences, accounts) — see
+# ARCHITECTURE.md §4.2. Live game state stays in its anchor region.
+---
+# Headless service for stable per-pod DNS (Erlang clustering needs node names).
+apiVersion: v1
+kind: Service
+metadata:
+  name: couchdb-headless
+  namespace: neon-data
+  labels: { app: couchdb }
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: { app: couchdb }
+  ports:
+    - { name: couchdb, port: 5984 }
+    - { name: epmd, port: 4369 }
+    - { name: erlang, port: 9100 }
+---
+# Client service used by the backend (COUCH_BASE_URL points here).
+apiVersion: v1
+kind: Service
+metadata:
+  name: couchdb
+  namespace: neon-data
+  labels: { app: couchdb }
+spec:
+  selector: { app: couchdb }
+  ports:
+    - { name: couchdb, port: 5984, targetPort: 5984 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: couchdb
+  namespace: neon-data
+  labels: { app: couchdb, app.kubernetes.io/part-of: neon-beat, tier: data }
+spec:
+  serviceName: couchdb-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app: couchdb }
+  template:
+    metadata:
+      labels: { app: couchdb, tier: data }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 5984
+        fsGroup: 5984
+        seccompProfile: { type: RuntimeDefault }
+      # Spread the 3 quorum members across zones for AZ failure tolerance.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels: { app: couchdb }
+      containers:
+        - name: couchdb
+          image: couchdb:3.3
+          ports:
+            - { containerPort: 5984, name: couchdb }
+            - { containerPort: 4369, name: epmd }
+            - { containerPort: 9100, name: erlang }
+          env:
+            - name: COUCHDB_USER
+              valueFrom: { secretKeyRef: { name: couchdb-auth, key: username } }
+            - name: COUCHDB_PASSWORD
+              valueFrom: { secretKeyRef: { name: couchdb-auth, key: password } }
+            - name: COUCHDB_SECRET
+              valueFrom: { secretKeyRef: { name: couchdb-auth, key: cookie } }
+            - name: ERL_FLAGS
+              # Stable Erlang cookie + fixed dist port for in-cluster clustering.
+              value: "-setcookie $(COUCHDB_SECRET) -kernel inet_dist_listen_min 9100 inet_dist_listen_max 9100"
+            - name: NODENAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits:   { cpu: "2", memory: "4Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /_up, port: couchdb }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /_up, port: couchdb }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - { name: data, mountPath: /opt/couchdb/data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ssd-retain   # provider SSD class with reclaimPolicy=Retain
+        resources:
+          requests: { storage: 50Gi }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: couchdb
+  namespace: neon-data
+spec:
+  minAvailable: 2   # keep quorum (2/3) during drains
+  selector:
+    matchLabels: { app: couchdb }
+# One-time cluster finalization (after first rollout), run once:
+#   kubectl -n neon-data exec couchdb-0 -- \
+#     curl -s -XPOST http://$USER:$PASS@127.0.0.1:5984/_cluster_setup \
+#       -H 'Content-Type: application/json' \
+#       -d '{"action":"finish_cluster"}'
+# (the 3 nodes join via couchdb-{0,1,2}.couchdb-headless before finalize)

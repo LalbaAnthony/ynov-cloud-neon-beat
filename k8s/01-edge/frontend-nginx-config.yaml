@@ -1,0 +1,47 @@
+# Shared nginx config for the three SPA frontends (game / admin / buzzer).
+# SPAs are immutable static bundles; runtime backend URL is injected via the
+# /g/<gameCode> gateway path returned by the matchmaker, so frontends do NOT
+# embed a fixed VITE_API_BASE_URL anymore (they read it from window config).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx
+  namespace: neon-edge
+  labels:
+    app.kubernetes.io/part-of: neon-beat
+data:
+  nginx.conf: |
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+    events { worker_connections 4096; }
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      sendfile on;
+      tcp_nopush on;
+      keepalive_timeout 65;
+      gzip on;
+      gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+      # nginx-unprivileged needs writable temp paths under a read-only rootfs.
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path       /tmp/proxy_temp;
+      fastcgi_temp_path     /tmp/fastcgi_temp;
+      uwsgi_temp_path       /tmp/uwsgi_temp;
+      scgi_temp_path        /tmp/scgi_temp;
+
+      server {
+        listen 8080;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Long cache for hashed assets, no-cache for the entrypoint.
+        location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; }
+        location = /index.html { add_header Cache-Control "no-cache"; }
+
+        # SPA history fallback.
+        location / { try_files $uri $uri/ /index.html; }
+
+        location = /healthz { return 200 'ok'; add_header Content-Type text/plain; }
+      }
+    }

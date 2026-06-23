@@ -1,0 +1,87 @@
+# Edge ingress. TLS is provisioned by cert-manager (see 04-security).
+# Hosts:
+#   play.neonbeat.io  -> game-front (public display)
+#   buzz.neonbeat.io  -> virtual-buzzer
+#   admin.neonbeat.io -> admin-front (behind OIDC auth)
+#   api.neonbeat.io   -> matchmaker (create/join games)
+#   live.neonbeat.io  -> realtime-gateway (WS + SSE, long-lived) -> GameServers
+---
+# Static SPAs + matchmaker API. Standard HTTP, short timeouts.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: neon-edge-web
+  namespace: neon-edge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Basic L7 rate limiting on public, unauthenticated endpoints (anti-abuse).
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [play.neonbeat.io, buzz.neonbeat.io, api.neonbeat.io]
+      secretName: neon-web-tls
+  rules:
+    - host: play.neonbeat.io
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: frontend-game, port: { number: 80 } } } }
+    - host: buzz.neonbeat.io
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: frontend-buzzer, port: { number: 80 } } } }
+    - host: api.neonbeat.io
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: matchmaker, port: { number: 80 } } } }
+---
+# Admin SPA: protected by an external OIDC authenticator (oauth2-proxy).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: neon-edge-admin
+  namespace: neon-edge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "https://auth.neonbeat.io/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://auth.neonbeat.io/oauth2/start?rd=$escaped_request_uri"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [admin.neonbeat.io]
+      secretName: neon-admin-tls
+  rules:
+    - host: admin.neonbeat.io
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: frontend-admin, port: { number: 80 } } } }
+---
+# Realtime gateway: WebSocket + SSE, long-lived. Buffering OFF, very long timeouts.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: neon-edge-live
+  namespace: neon-edge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # SSE: never buffer the stream.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # WS/SSE: keep the connection open for the whole game (up to 1h).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [live.neonbeat.io]
+      secretName: neon-live-tls
+  rules:
+    - host: live.neonbeat.io
+      http:
+        paths:
+          # /g/<gameCode>/(ws|sse/...|public/...|admin/...) -> gateway -> GameServer
+          - { path: /g/, pathType: Prefix, backend: { service: { name: realtime-gateway, port: { number: 80 } } } }
