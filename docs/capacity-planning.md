@@ -58,6 +58,6 @@ Répartition indicative selon la part de trafic par région (à ajuster selon le
 
 ## 6. Hypothèses et les limites
 
-- Le budget "50 parties/pod" est une **hypothèse à confirmer** par le test de charge (partie d'avant) ; il dépend de l'implémentation multi-parties (évolution voir `architecture.md`, partie 13).
+- Le budget "50 parties/pod" est une **hypothèse à confirmer** par le test de charge (partie d'avant) ; il dépend de l'implémentation multi-parties (évolution voir le fichier de rendu PDF, partie 13).
 - Le nombre de connexions par joueur peut augmenter (spectateurs, reconnexions) faut prévoir une marge.
 - Les coûts suivent l'usage réel grâce à l'autoscaling et (3 pods × 3 régions) constitue le coût plancher.

@@ -6,10 +6,9 @@ On va cibler : **10 000 joueurs simultanés**, **100 000 joueurs/semaine**, part
 
 ## Documentation
 
-| Document                                               | Contenu                                                                                        |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| [docs/architecture.md](docs/architecture.md)           | Rapport d'architecture complet (analyse, choix, diagrammes, sécurité, supervision, temps réel) |
-| [docs/capacity-planning.md](docs/capacity-planning.md) | Dimensionnement, budgets par pod, autoscaling, tests de charge                                 |
+| Document                                               | Contenu                                                        |
+| ------------------------------------------------------ | -------------------------------------------------------------- |
+| [docs/capacity-planning.md](docs/capacity-planning.md) | Dimensionnement, budgets par pod, autoscaling, tests de charge |
 
 ## En bref
 
@@ -26,7 +25,6 @@ Neon Beat maintient l'état d'une partie en mémoire (un processus = une partie)
 ├── README.md
 ├── Makefile                       # Cibles d'installation et de déploiement
 ├── docs/
-│   ├── architecture.md            # Rapport d'architecture (FR)
 │   └── capacity-planning.md       # Dimensionnement
 ├── platform/
 │   └── monitoring-values.yaml     # Valeurs Helm kube-prometheus-stack
@@ -51,7 +49,7 @@ Neon Beat maintient l'état d'une partie en mémoire (un processus = une partie)
 - Un cluster Kubernetes **par région** (ex. GKE/EKS dans `europe-west`, `us-east`, `asia-southeast`), chacun avec un node pool multi-AZ et le Cluster Autoscaler activé
 - Un cluster **MongoDB Atlas Global** (zone sharding) et un DNS géographique (Cloudflare / Route 53 / Cloud DNS)
 
-> Deux évolutions backend sont des prérequis fonctionnels (multi-parties par > processus, endpoint `/metrics`), détaillées dans > [docs/architecture.md](docs/architecture.md#13-évolutions-nécessaires-côté-applicatif).
+> Deux évolutions backend sont des prérequis fonctionnels (multi-parties par processus, endpoint `/metrics`), détaillées dans la partie 13.
 > La plateforme reste déployable sans elles en mode "une partie par pod".
 
 ## Déploiement

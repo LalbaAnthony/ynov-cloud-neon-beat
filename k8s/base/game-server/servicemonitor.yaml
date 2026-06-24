@@ -3,7 +3,7 @@
 #
 # Prerequis applicatif : le backend doit exposer /metrics au format Prometheus
 # (compteurs neon_active_games, neon_ws_connections, neon_sse_clients,
-# neon_buzz_latency_seconds, etc.). Voir docs/architecture.md (section Supervision).
+# neon_buzz_latency_seconds, etc.).
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
