@@ -478,9 +478,9 @@ L'architecture cloud est prête à déployer, mais elle suppose deux évolutions
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------- |
 | A1  | **Multi-parties par processus** : remplacer `current_game: Option<GameSession>` par `HashMap<GameId, GameSession>` et router les requêtes par `game_id` | Moyen        | Densité (plusieurs dizaines de parties par pod) au lieu d'un pod par partie (C1) |
 | A2  | **Endpoint `/metrics` Prometheus**                                                                                                                      | Faible       | Autoscaling KEDA + supervision (C5, §12)                                         |
-| A3  | **Endpoint `/internal/drain` + mode *draining***                                                                                                        | Faible       | *Drain* contrôlé lors des scale-down/déploiements (C2, §9.1)                     |
+| A3  | **Endpoint `/internal/drain` + mode draining**                                                                                                          | Faible       | Drain contrôlé lors des scale-down/déploiements (C2, §9.1)                       |
 | A4  | **Enregistrement dans Redis** (`game_id -> pod`) au démarrage de partie                                                                                 | Faible       | Cohérence du routage et reconstruction après perte de Redis                      |
-| A5  | **Lobby** (nouveau micro-service *stateless*)                                                                                                           | Faible/Moyen | Ancrage régional et résolution `game_id -> région` (C3)                          |
+| A5  | **Lobby** (nouveau micro-service stateless)                                                                                                             | Faible/Moyen | Ancrage régional et résolution `game_id -> région` (C3)                          |
 
 Aucune de ces évolutions ne remet en cause la logique de jeu existante. La persistance *checkpoint* (déjà présente) est l'élément qui rend tout le reste possible.
 
@@ -488,17 +488,17 @@ Tant que A1 n'est pas livré, la plateforme reste déployable en mode **"une par
 
 ## 14. Synthèse des choix
 
-| Décision             | Choix                                     | Alternative écartée                      | Raison                                            |
-| -------------------- | ----------------------------------------- | ---------------------------------------- | ------------------------------------------------- |
-| Modèle de scaling    | Sharding par partie (affinité `game_id`)  | Réplication *stateless* / pod-par-partie | État en mémoire + densité + arbitrage local       |
-| Routage intra-région | Ingress NGINX `upstream-hash-by` (ketama) | *Sticky cookie*                          | Idempotent par partie, remappage partiel au scale |
-| Routage mondial      | DNS géo + lobby                           | LB applicatif global unique              | Latence minimale + cloisonnement régional         |
-| Autoscaling          | KEDA sur métriques métier                 | HPA CPU                                  | La charge est liée aux connexions, pas au CPU     |
-| Base de données      | MongoDB Atlas (zone sharding)             | CouchDB multi-maître                     | Localité des données + outillage managé           |
-| Config multi-région  | Kustomize base + overlays                 | Helm chart unique                        | Lisibilité, diffs régionaux explicites            |
-| SPA                  | CDN                                       | Pods nginx                               | Statique = pas de calcul cluster                  |
-| Supervision          | kube-prometheus-stack                     | Solution maison                          | Standard, déclaratif                              |
+| Décision             | Choix                                     | Alternative écartée                    | Raison                                            |
+| -------------------- | ----------------------------------------- | -------------------------------------- | ------------------------------------------------- |
+| Modèle de scaling    | Sharding par partie (affinité `game_id`)  | Réplication stateless / pod-par-partie | État en mémoire + densité + arbitrage local       |
+| Routage intra-région | Ingress NGINX `upstream-hash-by` (ketama) | Sticky cookie                          | Idempotent par partie, remappage partiel au scale |
+| Routage mondial      | DNS géo + lobby                           | LB applicatif global unique            | Latence minimale + cloisonnement régional         |
+| Autoscaling          | KEDA sur métriques métier                 | HPA CPU                                | La charge est liée aux connexions, pas au CPU     |
+| Base de données      | MongoDB Atlas (zone sharding)             | CouchDB multi-maître                   | Localité des données + outillage managé           |
+| Config multi-région  | Kustomize base + overlays                 | Helm chart unique                      | Lisibilité, diffs régionaux explicites            |
+| SPA                  | CDN                                       | Pods nginx                             | Statique = pas de calcul cluster                  |
+| Supervision          | kube-prometheus-stack                     | Solution maison                        | Standard, déclaratif                              |
 
 ### En une phrase
 
-> Une plateforme **multi-région** où chaque partie est **ancrée près de ses joueurs** et **épinglée à un pod** (arbitrage temps réel local et incontestable), rendue **résiliente** par le *checkpoint* permanent en base et le *drain* contrôlé, et **élastique** par un autoscaling piloté sur des métriques métier plutôt que sur le CPU.
+> Une plateforme **multi-région** où chaque partie est **ancrée près de ses joueurs** et **épinglée à un pod** (arbitrage temps réel local et incontestable), rendue **résiliente** par le checkpoint permanent en base et le drain contrôlé, et **élastique** par un autoscaling piloté sur des métriques métier plutôt que sur le CPU.
