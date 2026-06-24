@@ -8,14 +8,14 @@ Infrastructure-as-Code for the global deployment of Neon Beat. See
 
 ## Layout (component breakdown)
 
-| Folder | Component | Key objects |
-|---|---|---|
-| `00-namespaces/` | Namespaces + Pod Security | `Namespace` (restricted/baseline) |
-| `01-edge/` | Stateless edge | frontends (`Deployment`/`Service`), `matchmaker`, `realtime-gateway`, `HPA`, `PDB`, `Ingress` |
-| `02-game-tier/` | Stateful game servers | Agones `Fleet`, `FleetAutoscaler`, `GameServerAllocation` (example) |
-| `03-data/` | Persistence | CouchDB `StatefulSet` (3-node cluster) + `PDB`, Redis `StatefulSet`, secrets (example) |
-| `04-security/` | Security | `cert-manager` issuer/cert, `RBAC`, `NetworkPolicy`, `ResourceQuota`/`LimitRange` |
-| `05-observability/` | Monitoring | `ServiceMonitor`/`PodMonitor`, `PrometheusRule`, Grafana dashboard |
+| Folder              | Component                 | Key objects                                                                                   |
+| ------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| `00-namespaces/`    | Namespaces + Pod Security | `Namespace` (restricted/baseline)                                                             |
+| `01-edge/`          | Stateless edge            | frontends (`Deployment`/`Service`), `matchmaker`, `realtime-gateway`, `HPA`, `PDB`, `Ingress` |
+| `02-game-tier/`     | Stateful game servers     | Agones `Fleet`, `FleetAutoscaler`, `GameServerAllocation` (example)                           |
+| `03-data/`          | Persistence               | CouchDB `StatefulSet` (3-node cluster) + `PDB`, Redis `StatefulSet`, secrets (example)        |
+| `04-security/`      | Security                  | `cert-manager` issuer/cert, `RBAC`, `NetworkPolicy`, `ResourceQuota`/`LimitRange`             |
+| `05-observability/` | Monitoring                | `ServiceMonitor`/`PodMonitor`, `PrometheusRule`, Grafana dashboard                            |
 
 ## Prerequisites (cluster add-ons)
 

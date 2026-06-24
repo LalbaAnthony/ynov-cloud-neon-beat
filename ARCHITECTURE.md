@@ -1,15 +1,3 @@
----
-title: "Neon Beat — Document d'architecture de déploiement Cloud"
-subtitle: "Déploiement mondial sur Kubernetes — 10 000 joueurs simultanés, pic 100 000 / semaine"
-author: "Équipe plateforme Neon Beat"
-date: "2026"
-lang: fr
-toc: true
-toc-depth: 3
-numbersections: true
-geometry: margin=2cm
----
-
 # Résumé exécutif
 
 Neon Beat est un blindtest temps réel composé d'un backend Rust, d'une base
@@ -37,10 +25,6 @@ données **CouchDB multi-région**. Le tout est rendu observable (Prometheus /
 Grafana / Loki / Tempo), sécurisé (TLS de bout en bout, NetworkPolicies, RBAC,
 WAF, secrets externalisés) et résilient (multi-AZ, multi-région, PDB,
 autoscaling à plusieurs niveaux).
-
-> **Note de langue** : ce document (livrable PDF) est rédigé en français. Les
-> manifestes IaC du livrable ZIP et leurs commentaires sont en anglais,
-> conformément aux conventions d'ingénierie de l'équipe.
 
 ---
 
