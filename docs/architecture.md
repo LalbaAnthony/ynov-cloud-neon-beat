@@ -23,8 +23,7 @@ Rapport d'architecture pour le passage de Neon Beat d'un déploiement *On Premis
 
 ### 1.1 Le besoin
 
-Neon Beat est un blindtest temps réel : un maitre du jeu (Game Master ou GM) anime une partie, des équipes répondent via des buzzers, et des écrans public affichent l'état du jeu. 
-Il semblerait que, historiquement, tout se déroulait dans une même pièce, sur un unique contrôleur matériel hébergeant l'ensemble des services.
+Neon Beat est un blindtest temps réel : un maitre du jeu (Game Master ou GM) anime une partie, des équipes répondent via des buzzers, et des écrans public affichent l'état du jeu. Il semblerait que, historiquement, tout se déroulait dans une même pièce, sur un unique contrôleur matériel hébergeant l'ensemble des services.
 
 L'objectif est maintenant d'ouvrir le jeu **au monde entier** :
 
@@ -58,13 +57,13 @@ Quatre dépôts composent la plateforme actuelle :
 | `neon-beat-admin-front`    | React/Vite (SPA)  | Console du Game Master                    | Statique                |
 | `neon-beat-virtual-buzzer` | React/Vite (SPA)  | Buzzer logiciel (remplace le matériel)    | Statique                |
 
-Le backend expose trois canaux (cf. `PROTOCOLS.md`) :
+Le backend expose trois canaux (voir `neon-beat-back/PROTOCOLS.md`) :
 
 - **REST** : contrôle de la partie (création, scores, révélation...).
 - **WebSocket `/ws`** : bidirectionnel, pour les buzzers (identification, buzz, motifs LED).
 - **SSE `/sse/public` et `/sse/admin`** : flux d'événements unidirectionnels vers les interfaces (une seule connexion admin autorisée par partie).
 
-Point déterminant relevé dans le code (`neon-beat-back/src/state/mod.rs`) :
+Point déterminant relevé dans le code (voir `neon-beat-back/src/state/mod.rs`) :
 ```rust
 pub struct AppState {
     // Une seule partie par processus.
@@ -75,8 +74,7 @@ pub struct AppState {
 
 -> **Un processus backend = une partie.** C'est le constat qui dicte toute l'architecture cloud.
 
-Élément favorable, en revanche : le backend persiste l'état de la partie en continu en base (écritures *debouncées* à 200 ms, *retry* optimiste, *flush* à l'arrêt).
-Une partie peut donc être **rechargée** depuis la base après un redémarrage. Cette propriété est la clé qui rend le modèle "stateful" tolérant aux pannes dans le cloud.
+Élément favorable, en revanche : le backend persiste l'état de la partie en continu en base (écritures *debouncées* à 200 ms, *retry* optimiste, *flush* à l'arrêt). Une partie peut donc être **rechargée** depuis la base après un redémarrage. Cette propriété est la clé qui rend le modèle "stateful" tolérant aux pannes dans le cloud.
 
 ## 3. Identification des points critiques
 
@@ -107,7 +105,7 @@ On adopte donc un modèle de sharding par partie :
 | Option                                                               | Description                                       | Pourquoi écartée                                                                                                                                                 |
 | -------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pod par partie (type Agones)                                         | Un pod dédié créé à la demande pour chaque partie | Gaspillage massif : une partie ne porte que ~4 à 20 joueurs ; 1 250 parties = 1 250 pods. Cold start à chaque création. Surcoût d'orchestration disproportionné. |
-| Backend *stateless* + état partagé (Redis/DB pour tout l'état chaud) | Externaliser toute la machine à états dans Redis  | Réécriture lourde du backend ; ajoute une latence réseau sur le chemin critique du buzz ; perd l'avantage de l'arbitrage local instantané.                       |
+| Backend *stateless* + état partagé (Redis/DB pour tout l'état chaud) | Externaliser toute la machine à états dans Redis  | Réécriture lourde du backend ; ajoute une latence réseau sur le chemin critique du buzz ; perd l'avantage de l'arbitrage local instantané                        |
 
 -> Le sharding par partie avec backend multi-parties est le meilleur compromis : densité correcte (plusieurs dizaines de parties par pod), latence d'arbitrage minimale (tout en mémoire locale).
 
@@ -177,9 +175,10 @@ flowchart TB
     LOBBY --> DB
 ```
 
-**Lecture :** le DNS géographique route chaque client vers la région la plus proche.
+**Lecture :** le DNS géographique route chaque client vers la région la plus proche. 
+
 Les SPA sont servies par un CDN (latence minimale, déchargement total des clusters).
-Le *lobby* (plan de contrôle global) indique à un client rejoignant une partie quelle région contacter.
+Le lobby (plan de contrôle global) indique à un client rejoignant une partie quelle région contacter. 
 À l'intérieur de chaque région, l'Ingress route par `game_id` vers le bon pod.
 
 ### 5.2 Vue d'une région
@@ -251,46 +250,41 @@ sequenceDiagram
 
 ## 6. Choix des composants Kubernetes
 
-| Besoin                                | Composant retenu                                                           | Justification                                                                                                                                                                                     |
-| ------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Entrée / L7**                       | Ingress NGINX                                                              | Support natif WebSocket, SSE (désactivation du *buffering*), et surtout `upstream-hash-by` pour l'affinité de partie par hachage consistant. Mature et éprouvé.                                   |
-| **Équilibrage L4**                    | Cloud Load Balancer (par région)                                           | Terminaison réseau, IP publique régionale, intégration *health checks*.                                                                                                                           |
-| **Routage mondial**                   | DNS géographique / Anycast (Cloudflare, Route 53 latency-based, Cloud DNS) | Dirige chaque client vers la région la plus proche sans logique applicative.                                                                                                                      |
-| **Charge de jeu**                     | `Deployment` game-server                                                   | Pods *fongibles* mais épinglés via le registre ; un `Deployment` (et non un `StatefulSet`) suffit car l'identité stable est portée par le mapping `game_id -> pod` dans Redis, pas par un volume. |
-| **Autoscaling pods**                  | KEDA (`ScaledObject`) sur métriques Prometheus                             | La charge dépend des **connexions** et des **parties actives**, pas du CPU. KEDA scale sur `neon_active_games` et connexions temps réel.                                                          |
-| **Autoscaling noeuds**                | Cluster Autoscaler / Karpenter                                             | Ajoute des noeuds quand les pods ne tiennent plus, les retire hors pic.                                                                                                                           |
-| **Disponibilité pendant maintenance** | `PodDisruptionBudget`                                                      | Garantit >= 75 % de pods pendant les opérations volontaires.                                                                                                                                      |
-| **Registre de sessions / pub-sub**    | Redis (régional)                                                           | Stocke `game_id -> pod`, sert de bus léger ; managé et HA en production.                                                                                                                          |
-| **Plan de contrôle global**           | `lobby` (nouveau service *stateless*)                                      | Choisit la région d'ancrage et résout `game_id -> région`. HPA CPU classique.                                                                                                                     |
-| **Secrets**                           | External Secrets Operator + gestionnaire cloud                             | Pas de secret en clair dans Git ; rotation centralisée.                                                                                                                                           |
-| **TLS**                               | cert-manager + Let's Encrypt                                               | Certificats automatiques et renouvelés.                                                                                                                                                           |
-| **Configuration multi-région**        | Kustomize (base + overlays)                                                | Une base commune, un overlay par région (region, hôte, URI DB).                                                                                                                                   |
-| **Supervision**                       | kube-prometheus-stack (Prometheus, Grafana, Alertmanager)                  | Standard de facto ; `ServiceMonitor`/`PrometheusRule` déclaratifs.                                                                                                                                |
-| **Isolation réseau**                  | NetworkPolicies                                                            | "Deny par défaut" + ouverture explicite des flux.                                                                                                                                                 |
-| **SPA statiques**                     | CDN + stockage objet                                                       | Aucune raison de consommer des pods pour du statique ; latence minimale mondiale.                                                                                                                 |
+| Besoin                                | Composant retenu                                                           | Justification                                                                                                                                                                                  |
+| ------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Entrée / L7**                       | Ingress NGINX                                                              | Support natif WebSocket, SSE (désactivation du buffering), et surtout `upstream-hash-by` pour l'affinité de partie par hachage consistant. Mature et éprouvé                                   |
+| **Équilibrage L4**                    | Cloud Load Balancer (par région)                                           | Terminaison réseau, IP publique régionale, intégration health checks                                                                                                                           |
+| **Routage mondial**                   | DNS géographique / Anycast (Cloudflare, Route 53 latency-based, Cloud DNS) | Dirige chaque client vers la région la plus proche sans logique applicative                                                                                                                    |
+| **Charge de jeu**                     | `Deployment` game-server                                                   | Pods fongibles mais épinglés via le registre ; un `Deployment` (et non un `StatefulSet`) suffit car l'identité stable est portée par le mapping `game_id -> pod` dans Redis, pas par un volume |
+| **Autoscaling pods**                  | KEDA (`ScaledObject`) sur métriques Prometheus                             | La charge dépend des **connexions** et des **parties actives**, pas du CPU. KEDA scale sur `neon_active_games` et connexions temps réel                                                        |
+| **Autoscaling noeuds**                | Cluster Autoscaler / Karpenter                                             | Ajoute des noeuds quand les pods ne tiennent plus, les retire hors pic                                                                                                                         |
+| **Disponibilité pendant maintenance** | `PodDisruptionBudget`                                                      | Garantit >= 75 % de pods pendant les opérations volontaires                                                                                                                                    |
+| **Registre de sessions / pub-sub**    | Redis (régional)                                                           | Stocke `game_id -> pod`, sert de bus léger ; managé et HA en production                                                                                                                        |
+| **Plan de contrôle global**           | `lobby` (nouveau service *stateless*)                                      | Choisit la région d'ancrage et résout `game_id -> région`                                                                                                                                      |
+| **Secrets**                           | External Secrets Operator + gestionnaire cloud                             | Pas de secret en clair dans Git ; rotation centralisée                                                                                                                                         |
+| **TLS**                               | cert-manager + Let's Encrypt                                               | Certificats automatiques et renouvelés                                                                                                                                                         |
+| **Configuration multi-région**        | Kustomize (base + overlays)                                                | Une base commune, un overlay par région (region, hôte, URI DB)                                                                                                                                 |
+| **Supervision**                       | kube-prometheus-stack (Prometheus, Grafana, Alertmanager)                  | Standard de facto ; `ServiceMonitor`/`PrometheusRule` déclaratifs                                                                                                                              |
+| **Isolation réseau**                  | NetworkPolicies                                                            | "Deny par défaut" + ouverture explicite des flux                                                                                                                                               |
+| **SPA statiques**                     | CDN + stockage objet                                                       | Aucune raison de consommer des pods pour du statique ; latence minimale mondiale                                                                                                               |
 
-> Détail des manifestes : voir `k8s/base/` (ressources communes) et
-> `k8s/overlays/<région>/` (spécialisations régionales).
+> Détail des manifestes : voir `k8s/base/` (ressources communes) et `k8s/overlays/<région>/` (spécialisations régionales).
 
 ## 7. Gestion du temps réel
 
 ### 7.1 Deux protocoles, deux usages
 
-| Canal         | Protocole | Sens              | Clients             | Contrainte cloud                                                    |
-| ------------- | --------- | ----------------- | ------------------- | ------------------------------------------------------------------- |
-| `/ws`         | WebSocket | bidirectionnel    | Buzzers             | *Upgrade* HTTP/1.1, connexion longue, faible latence d'aller-retour |
-| `/sse/public` | SSE       | serveur -> client | Écrans / game front | Pas de *buffering* proxy, *keep-alive*                              |
-| `/sse/admin`  | SSE       | serveur -> client | Console GM          | Idem + connexion unique par partie                                  |
+| Canal         | Protocole | Sens              | Clients             | Contrainte cloud                                                  |
+| ------------- | --------- | ----------------- | ------------------- | ----------------------------------------------------------------- |
+| `/ws`         | WebSocket | bidirectionnel    | Buzzers             | Upgrade HTTP/1.1, connexion longue, faible latence d'aller-retour |
+| `/sse/public` | SSE       | serveur -> client | Écrans / game front | Pas de buffering proxy, keep-alive                                |
+| `/sse/admin`  | SSE       | serveur -> client | Console GM          | Idem + connexion unique par partie                                |
 
-L'Ingress est configuré en conséquence (cf. `k8s/base/ingress/ingress.yaml`) : `proxy-read-timeout: 7200` (une partie dure jusqu'à 2 h), `proxy-buffering: off` (diffusion SSE immédiate), gestion native de l'*upgrade* WebSocket.
+L'Ingress est configuré en conséquence (voir `k8s/base/ingress/ingress.yaml`) : `proxy-read-timeout: 7200` (une partie dure jusqu'à 2 h), `proxy-buffering: off` (diffusion SSE immédiate), gestion native de l'upgrade WebSocket.
 
 ### 7.2 Affinité de partie = arbitrage local incontestable
 
-Comme **tout le trafic d'une partie atterrit sur un seul pod**, l'ordre des buzz est
-déterminé localement, en mémoire, par ce pod. **Aucun consensus distribué n'est
-nécessaire** : c'est à la fois plus simple et bien plus rapide (pas d'aller-retour
-réseau pour décider qui a buzzé en premier). La latence ressentie se réduit alors à
-`RTT(joueur ↔ région d'ancrage)`, que le routage géographique minimise.
+Comme **tout le trafic d'une partie atterrit sur un seul pod**, l'ordre des buzz est déterminé localement, en mémoire, par ce pod. **Aucun consensus distribué n'est nécessaire** : c'est à la fois plus simple et bien plus rapide (pas d'aller-retour réseau pour décider qui a buzzé en premier). La latence ressentie se réduit alors à `RTT(joueur ↔ région d'ancrage)`, que le routage géographique minimise.
 
 ```mermaid
 sequenceDiagram
@@ -310,17 +304,13 @@ sequenceDiagram
 
 ### 7.3 Reconnexion et tolérance aux coupures
 
-Les protocoles prévoient déjà la reconnexion (ré-identification du buzzer, *patterns*
-restaurés ; *handshake* SSE rejoué). En cas de bascule de pod (déploiement, panne),
-le client se reconnecte, l'Ingress le re-route vers le nouveau pod hôte, qui **a
-rechargé la partie depuis la base**. La continuité de jeu est préservée.
+Les protocoles prévoient déjà la reconnexion (ré-identification du buzzer, *patterns* restaurés ; *handshake* SSE rejoué). En cas de bascule de pod (déploiement, panne), le client se reconnecte, l'Ingress le re-route vers le nouveau pod hôte, qui **a rechargé la partie depuis la base**. La continuité de jeu est préservée.
 
 ## 8. Scalabilité et dimensionnement
 
 ### 8.1 Raisonner en connexions, pas en requêtes
 
-Le coût dominant est la **mémoire par connexion maintenue**, pas le CPU. Un pod Rust
-/ Tokio tient confortablement plusieurs milliers de connexions quasi inactives.
+Le coût dominant est la **mémoire par connexion maintenue**, pas le CPU. Un pod Rust / Tokio tient confortablement plusieurs milliers de connexions quasi inactives.
 
 ### 8.2 Hypothèses de dimensionnement
 
@@ -339,10 +329,7 @@ Le coût dominant est la **mémoire par connexion maintenue**, pas le CPU. Un po
 - Par les **parties** : `1 250 / 40 ≈ 32 pods` au pic (toutes régions confondues).
 - Par les **connexions** : `25 000 / 1 600 ≈ 16 pods`.
 
--> La contrainte dominante est le nombre de parties. On dimensionne sur **~32 pods au
-pic mondial**, répartis sur 3 régions, avec `minReplicaCount: 3` par région (socle
-chaud) et `maxReplicaCount: 60` par région (large marge pour absorber un déséquilibre
-régional ou un événement).
+-> La contrainte dominante est le nombre de parties. On dimensionne sur **~32 pods au pic mondial**, répartis sur 3 régions, avec `minReplicaCount: 3` par région (socle chaud) et `maxReplicaCount: 60` par région (large marge pour absorber un déséquilibre régional ou un événement).
 
 ### 8.4 Politique d'autoscaling
 
@@ -356,26 +343,19 @@ flowchart LR
     CA -->|+ noeuds| N["Node pool multi-AZ"]
 ```
 
-- **Montée** réactive (fenêtre 30 s, +100 % ou +5 pods/30 s) : un afflux de joueurs
-  doit être absorbé vite.
-- **Descente** prudente (fenêtre 300 s, −10 %/min) : chaque pod retiré doit drainer
-  ses parties ; on évite le *flapping* et les reconnexions inutiles.
-- **Repli** (`fallback`) : si Prometheus est indisponible, on maintient 10 pods de
-  sécurité.
+- **Montée** réactive (fenêtre 30 s, +100 % ou +5 pods/30 s) : un afflux de joueurs doit être absorbé vite.
+- **Descente** prudente (fenêtre 300 s, −10 %/min) : chaque pod retiré doit drainer ses parties ; on évite le *flapping* et les reconnexions inutiles.
+- **Repli** (`fallback`) : si Prometheus est indisponible, on maintient 10 pods de sécurité.
 
 ### 8.5 Élasticité économique
 
-Hors pic, le socle chaud (3 pods/région) + le Cluster Autoscaler permettent de
-réduire fortement le nombre de noeuds. Les 100 000 joueurs/semaine ne sont jamais
-simultanés : l'autoscaling suit la courbe d'usage réelle (soirées, week-ends).
+Hors pic, le socle chaud (3 pods/région) + le Cluster Autoscaler permettent de réduire fortement le nombre de noeuds. Les 100 000 joueurs/semaine ne sont jamais simultanés : l'autoscaling suit la courbe d'usage réelle (soirées, week-ends).
 
 ## 9. Résilience et continuité de service
 
-### 9.1 Le *drain* contrôlé (coeur de la résilience "stateful")
+### 9.1 Le drain contrôlé (pour la résilience "stateful")
 
-Lorsqu'un pod doit disparaître (scale-down, mise à jour, *drain* de noeud), il ne
-faut pas couper brutalement les parties. Séquence orchestrée par le `preStop` et le
-mode `draining` applicatif :
+Lorsqu'un pod doit disparaître (scale-down, mise à jour, *drain* de noeud), il ne faut pas couper brutalement les parties. Séquence orchestrée par le `preStop` et le mode `draining` applicatif :
 
 ```mermaid
 sequenceDiagram
@@ -398,14 +378,10 @@ sequenceDiagram
     P->>K8s: terminaison propre
 ```
 
-Garanties :
-
-- **`maxUnavailable: 0` + `maxSurge: 25 %`** : les nouveaux pods sont prêts avant le
-  retrait des anciens.
-- **`terminationGracePeriodSeconds: 120`** : temps de *checkpoint* + signal de
-  reconnexion.
-- **Perte de données <= 200 ms** (fenêtre de *debounce* d'écriture), grâce au
-  *checkpoint* permanent déjà implémenté.
+Avec :
+- **`maxUnavailable: 0` + `maxSurge: 25 %`** : les nouveaux pods sont prêts avant le retrait des anciens.
+- **`terminationGracePeriodSeconds: 120`** : temps de checkpoint + signal de reconnexion.
+- **Perte de données <= 200 ms** (fenêtre de debounce d'écriture), grâce au checkpoint permanent déjà implémenté.
 
 ### 9.2 Pannes non planifiées
 
@@ -417,12 +393,6 @@ Garanties :
 | Perte d'une AZ     | Node pool multi-AZ + PDB ; capacité réduite, service maintenu                                                                                            |
 | Perte d'une région | Régions indépendantes : seules les parties ancrées dans cette région sont touchées ; le DNS retire la région et les nouvelles parties basculent ailleurs |
 | DB injoignable     | Mode dégradé applicatif (lecture mémoire, écritures bufferisées) + alerte `StorageDegraded`                                                              |
-
-### 9.3 Multi-AZ et anti-affinité
-
-Les `topologySpreadConstraints` (clé `topology.kubernetes.io/zone`) et l'anti-affinité
-par hôte garantissent qu'une partie ne dépend pas d'une AZ unique et qu'une *fleet*
-n'est jamais concentrée sur un seul noeud.
 
 ## 10. Base de données multi-région
 
@@ -440,13 +410,9 @@ flowchart TB
     LOBBY["lobby"] -->|"annuaire global (game_id->région)"| Atlas
 ```
 
-- **Zone sharding** par champ de localisation : les documents d'une partie sont
-  physiquement stockés dans la région de la partie -> écritures/lectures locales,
-  latence DB minimale sur le chemin critique.
-- **Annuaire global** (`game_id -> région`) dans une base de contrôle (`neon_control`)
-  répliquée, interrogée par le lobby.
-- Le backend gère déjà l'amortissement des écritures (*debounce* 200 ms, *retry*
-  optimiste) : la DB n'est jamais saturée par les rafales de buzz/scores.
+- **Zone sharding** par champ de localisation : les documents d'une partie sont physiquement stockés dans la région de la partie -> écritures/lectures locales, latence DB minimale sur le chemin critique.
+- **Annuaire global** (`game_id -> région`) dans une base de contrôle (`neon_control`) répliquée, interrogée par le lobby.
+- Le backend gère déjà l'amortissement des écritures (*debounce* 200 ms, *retry* optimiste) : la DB n'est jamais saturée par les rafales de buzz/scores.
 
 ## 11. Sécurité
 
@@ -465,8 +431,7 @@ Défense en profondeur, du bord vers le coeur :
 | **RBAC**            | `automountServiceAccountToken: false`, SA sans droits                               | Le game-server n'a pas besoin de l'API Kubernetes                                         |
 | **Chaîne d'appro.** | Scan d'images (Trivy) en CI, images *distroless*/slim                               | Réduction de la surface d'attaque (le runtime est déjà `debian-slim`)                     |
 
-> Option avancée : *service mesh* (Linkerd/Istio) pour mTLS intra-cluster si la
-> conformité l'exige. Écarté par défaut pour ne pas alourdir le chemin temps réel.
+> Option avancée : *service mesh* (Linkerd/Istio) pour mTLS intra-cluster si la conformité l'exige. Écarté par défaut pour ne pas alourdir le chemin temps réel.
 
 ## 12. Supervision
 
@@ -484,12 +449,9 @@ flowchart LR
     ALERT --> PD["PagerDuty / Slack"]
 ```
 
-- **Métriques (Prometheus)** : modèle RED (Rate, Errors, Duration) + métriques métier
-  (`neon_active_games`, `neon_ws_connections`, `neon_sse_clients`,
-  `neon_buzz_latency_seconds`, `neon_storage_degraded`).
+- **Métriques (Prometheus)** : modèle RED (Rate, Errors, Duration) + métriques métier (`neon_active_games`, `neon_ws_connections`, `neon_sse_clients`, `neon_buzz_latency_seconds`, `neon_storage_degraded`).
 - **Logs (Loki)** : le backend journalise déjà via `tracing` ; agrégation centralisée.
-- **Traces (Tempo)** : `tracing` -> OpenTelemetry pour suivre une requête de bout en
-  bout (utile pour diagnostiquer la latence de buzz).
+- **Traces (Tempo)** : `tracing` -> OpenTelemetry pour suivre une requête de bout en bout (utile pour diagnostiquer la latence de buzz).
 
 ### 12.2 SLO et alertes
 
@@ -502,18 +464,15 @@ flowchart LR
 | Santé DB                  | Pas de mode dégradé     | `StorageDegraded`           |
 | Autoscaling               | Réagit à la saturation  | `KedaScalerStalled`         |
 
-Règles déclarées dans `k8s/base/monitoring/prometheus-rules.yaml`, tableau de bord
-Grafana provisionné via `k8s/base/monitoring/grafana-dashboard.yaml`.
+Règles déclarées dans `k8s/base/monitoring/prometheus-rules.yaml`, tableau de bord Grafana provisionné via `k8s/base/monitoring/grafana-dashboard.yaml`.
 
 ### 12.3 Prérequis applicatif
 
-Le backend doit exposer un endpoint **`/metrics`** au format Prometheus (cf. section
-suivante). C'est la seule brique de supervision manquante côté code.
+Le backend doit exposer un endpoint **`/metrics`** au format Prometheus (voir section suivante). C'est la seule brique de supervision manquante côté code.
 
 ## 13. Évolutions nécessaires côté applicatif
 
-L'architecture cloud est prête à déployer, mais elle suppose deux évolutions
-**modérées** du backend Rust, identifiées comme prérequis (et non comme réécriture) :
+L'architecture cloud est prête à déployer, mais elle suppose deux évolutions **modérées** du backend Rust, identifiées comme prérequis (et non comme réécriture) :
 
 | #   | Évolution                                                                                                                                               | Effort       | Pourquoi                                                                         |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------- |
@@ -523,13 +482,9 @@ L'architecture cloud est prête à déployer, mais elle suppose deux évolutions
 | A4  | **Enregistrement dans Redis** (`game_id -> pod`) au démarrage de partie                                                                                 | Faible       | Cohérence du routage et reconstruction après perte de Redis                      |
 | A5  | **Lobby** (nouveau micro-service *stateless*)                                                                                                           | Faible/Moyen | Ancrage régional et résolution `game_id -> région` (C3)                          |
 
-Aucune de ces évolutions ne remet en cause la logique de jeu existante. La persistance
-*checkpoint* (déjà présente) est l'élément qui rend tout le reste possible.
+Aucune de ces évolutions ne remet en cause la logique de jeu existante. La persistance *checkpoint* (déjà présente) est l'élément qui rend tout le reste possible.
 
-Tant que A1 n'est pas livré, la plateforme reste déployable en mode **"une partie par
-pod"** (le hachage par `game_id` envoie chaque partie sur un pod ; la densité est
-simplement plus faible). La migration vers le multi-parties est donc **incrémentale**
-et sans rupture.
+Tant que A1 n'est pas livré, la plateforme reste déployable en mode **"une partie par pod"** (le hachage par `game_id` envoie chaque partie sur un pod ; la densité est simplement plus faible). La migration vers le multi-parties est donc **incrémentale** et sans rupture.
 
 ## 14. Synthèse des choix
 
@@ -546,8 +501,4 @@ et sans rupture.
 
 ### En une phrase
 
-> Une plateforme **multi-région** où chaque partie est **ancrée près de ses joueurs**
-> et **épinglée à un pod** (arbitrage temps réel local et incontestable), rendue
-> **résiliente** par le *checkpoint* permanent en base et le *drain* contrôlé, et
-> **élastique** par un autoscaling piloté sur des métriques métier plutôt que sur le
-> CPU.
+> Une plateforme **multi-région** où chaque partie est **ancrée près de ses joueurs** et **épinglée à un pod** (arbitrage temps réel local et incontestable), rendue **résiliente** par le *checkpoint* permanent en base et le *drain* contrôlé, et **élastique** par un autoscaling piloté sur des métriques métier plutôt que sur le CPU.
