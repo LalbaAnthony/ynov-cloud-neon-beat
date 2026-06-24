@@ -1,0 +1,32 @@
+# Overlay region Asie-Pacifique Sud-Est (cluster dedie, ex : asia-southeast1 / ap-southeast-1).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: game-server-config
+    patch: |
+      - op: replace
+        path: /data/NEON_REGION
+        value: "ap-southeast"
+  - target:
+      kind: Deployment
+      name: game-server
+    patch: |
+      - op: add
+        path: /spec/template/metadata/labels/topology.kubernetes.io~1region
+        value: "ap-southeast"
+  - target:
+      kind: Ingress
+      name: game-server
+    patch: |
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: "ap.neon-beat.app"
+      - op: replace
+        path: /spec/rules/0/host
+        value: "ap.neon-beat.app"

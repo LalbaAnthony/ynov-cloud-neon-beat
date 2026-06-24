@@ -1,0 +1,26 @@
+# Configuration non sensible du game-server.
+# Les valeurs sensibles (URI MongoDB, credentials) sont injectees via Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-server-config
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+data:
+  # Backend de persistance choisi : MongoDB (zone sharding multi-region cote Atlas).
+  NEON_STORE: "mongo"
+  MONGO_DB: "neon_beat"
+  # Port HTTP expose par le binaire Rust (REST + WS + SSE sur le meme port).
+  PORT: "8080"
+  # Niveau de log ; "info" en production, surcharge possible par overlay.
+  RUST_LOG: "info,neon_beat_back=info"
+  # Region logique du pod : sert au routage et a l'etiquetage des metriques.
+  # Surchargee par chaque overlay regional (eu-west, us-east, ap-southeast).
+  NEON_REGION: "unset"
+  # Endpoint du registre de sessions Redis (game_id -> pod) et du bus pub/sub.
+  REDIS_URL: "redis://redis.neon-data.svc.cluster.local:6379"
+  # Nombre maximal de parties hebergees simultanement par un pod.
+  # Plafond dur cote applicatif ; l'autoscaling vise une cible plus basse (cf. KEDA).
+  NEON_MAX_GAMES_PER_POD: "50"

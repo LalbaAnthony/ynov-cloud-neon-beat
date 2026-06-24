@@ -1,0 +1,84 @@
+# Redis regional : registre de sessions (game_id -> pod) + bus pub/sub.
+#
+# En production, privilegier un Redis MANAGE et HA (Memorystore / ElastiCache, ou
+# Redis Sentinel/Cluster). On fournit ici un Redis mono-instance pret a l'emploi
+# pour les environnements de pre-production. La donnee est volatile et
+# reconstructible : les pods game-server se re-enregistrent au demarrage, donc une
+# perte de Redis n'entraine pas de perte de partie (juste une re-synchronisation).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: neon-data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/part-of: neon-beat
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args:
+            # maxmemory + politique d'eviction : le registre est borne, on evince
+            # les cles les moins recemment utilisees si saturation.
+            - "--maxmemory"
+            - "256mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+            - "--appendonly"
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "320Mi"
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: neon-data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

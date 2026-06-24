@@ -1,0 +1,39 @@
+# Namespaces de la plateforme Neon Beat.
+# On isole les domaines fonctionnels pour appliquer des quotas, des NetworkPolicies
+# et des droits RBAC distincts par couche.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neon-game
+  labels:
+    # Couche temps reel (game-server + lobby) : c'est le coeur stateful du systeme.
+    app.kubernetes.io/part-of: neon-beat
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neon-data
+  labels:
+    # Couche donnees regionale (Redis de registre/pub-sub, proxys DB).
+    app.kubernetes.io/part-of: neon-beat
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neon-observability
+  labels:
+    # Stack de supervision (Prometheus, Grafana, Loki, Tempo, Alertmanager).
+    app.kubernetes.io/part-of: neon-beat
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neon-ingress
+  labels:
+    # Controleur d'entree (NGINX Ingress) + cert-manager.
+    app.kubernetes.io/part-of: neon-beat
+    pod-security.kubernetes.io/enforce: privileged

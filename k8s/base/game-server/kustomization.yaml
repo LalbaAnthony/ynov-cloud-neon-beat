@@ -1,0 +1,12 @@
+# Regroupe toutes les ressources du game-server (couche temps reel).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secret.example.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - hpa-keda.yaml
+  - servicemonitor.yaml

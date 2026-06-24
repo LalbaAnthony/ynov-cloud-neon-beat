@@ -1,0 +1,51 @@
+# Valeurs Helm pour kube-prometheus-stack.
+# Active la decouverte des ServiceMonitor/PrometheusRule de toutes les namespaces
+# et le sidecar de provisioning des dashboards Grafana.
+prometheus:
+  prometheusSpec:
+    # On scrape les ServiceMonitor de toutes les namespaces (pas seulement celles
+    # portant le label release), pour couvrir neon-game.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 15d
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+    # Stockage persistant des series temporelles.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+grafana:
+  # Le sidecar charge automatiquement les ConfigMap labellisees grafana_dashboard=1.
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+  defaultDashboardsEnabled: true
+  adminPassword: "change-me-in-secret-manager"
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+  config:
+    route:
+      group_by: ["alertname", "region"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: "default"
+    receivers:
+      - name: "default"
+        # Brancher ici le webhook reel (PagerDuty / Slack / Opsgenie).
+        # webhook_configs:
+        #   - url: "https://hooks.slack.com/services/XXX"

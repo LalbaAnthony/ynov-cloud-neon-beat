@@ -1,0 +1,90 @@
+# Regles Prometheus : enregistrements (SLO) + alertes.
+# Modele RED (Rate, Errors, Duration) pour les API et metriques metier temps reel.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: neon-beat-rules
+  namespace: neon-observability
+  labels:
+    app.kubernetes.io/part-of: neon-beat
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: neon-beat.slo
+      interval: 30s
+      rules:
+        # Latence de prise en compte d'un buzz (du clic au verdict serveur), p99.
+        # C'est l'indicateur d'experience le plus critique du jeu.
+        - record: neon:buzz_latency_seconds:p99
+          expr: histogram_quantile(0.99, sum(rate(neon_buzz_latency_seconds_bucket[5m])) by (le, region))
+        # Taux d'erreur HTTP 5xx du backend.
+        - record: neon:http_error_ratio:ratio5m
+          expr: |
+            sum(rate(neon_http_requests_total{code=~"5.."}[5m])) by (region)
+            / sum(rate(neon_http_requests_total[5m])) by (region)
+        # Connexions temps reel totales par region.
+        - record: neon:realtime_connections:sum
+          expr: sum(neon_ws_connections + neon_sse_clients) by (region)
+
+    - name: neon-beat.alerts
+      rules:
+        # --- Disponibilite ---
+        - alert: GameServerDown
+          expr: count(up{job="game-server"} == 1) by (region) < 2
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Moins de 2 game-server actifs en region {{ $labels.region }}"
+            description: "Risque de perte de capacite temps reel ; verifier l'autoscaling et les noeuds."
+
+        # --- Experience de jeu : latence de buzz ---
+        - alert: BuzzLatencyHigh
+          expr: neon:buzz_latency_seconds:p99 > 0.4
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Latence de buzz p99 > 400ms en region {{ $labels.region }}"
+            description: "L'arbitrage des buzz se degrade ; verifier la charge des pods et la DB."
+
+        # --- Saturation : on approche le plafond de parties par pod ---
+        - alert: GameServerSaturation
+          expr: |
+            sum(neon_active_games) by (region)
+            / (count(up{job="game-server"} == 1) by (region) * 50) > 0.85
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Fleet game-server saturee a >85% en region {{ $labels.region }}"
+            description: "L'autoscaling doit ajouter des pods ; verifier maxReplicaCount et le Cluster Autoscaler."
+
+        # --- Mode degrade base de donnees ---
+        - alert: StorageDegraded
+          expr: max(neon_storage_degraded) by (region) == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend en mode degrade (DB injoignable) en region {{ $labels.region }}"
+            description: "Les ecritures sont suspendues/bufferisees ; verifier MongoDB Atlas."
+
+        # --- Erreurs HTTP ---
+        - alert: HttpErrorRateHigh
+          expr: neon:http_error_ratio:ratio5m > 0.02
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Taux d'erreurs 5xx > 2% en region {{ $labels.region }}"
+
+        # --- Echec d'autoscaling ---
+        - alert: KedaScalerStalled
+          expr: sum(neon_active_games) by (region) / (count(up{job="game-server"} == 1) by (region) * 50) > 0.9 and rate(kube_deployment_status_replicas[10m]) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Saturation sans ajout de replicas en region {{ $labels.region }}"
+            description: "KEDA/HPA ou le Cluster Autoscaler ne montent pas la fleet ; intervention requise."

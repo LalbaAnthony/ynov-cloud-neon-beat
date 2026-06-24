@@ -1,0 +1,59 @@
+# Ingress regional du game-server.
+#
+# Points cles geres ici :
+#   1. AFFINITE DE PARTIE : routage consistant (ketama) par game_id afin que tout
+#      le trafic d'une partie (REST + WS + SSE) atterrisse TOUJOURS sur le meme pod,
+#      ou l'etat en memoire de cette partie reside. Le hachage consistant limite le
+#      remappage a une fraction des parties lors d'un scale up/down.
+#   2. WEBSOCKET (buzzers) : upgrade gere nativement ; timeouts longs.
+#   3. SSE (frontends) : desactivation du buffering pour une diffusion immediate.
+#   4. TLS termine ici via cert-manager (Let's Encrypt).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: game-server
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # --- Affinite de partie (coeur du modele stateful) ---
+    # Hachage consistant sur le parametre de requete game_id : meme partie -> meme pod.
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_game_id"
+    nginx.ingress.kubernetes.io/upstream-hash-by-subset: "false"
+    # --- Connexions longues (WS + SSE) ---
+    # Une partie peut durer jusqu'a 2h : on autorise des connexions tres longues.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "7200"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "7200"
+    # SSE : pas de mise en tampon cote proxy, sinon les evenements arrivent par paquets.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    # --- Protection anti-abus (spam de buzz, scrapers) ---
+    # Limite genereuse : un joueur legitime buzze quelques fois par minute.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+    # --- CORS verrouille (le backend est en CORS permissif : on restreint au bord) ---
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://*.neon-beat.app"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        # Hote regional : surcharge par overlay (eu / us / ap).
+        - eu.neon-beat.app
+      secretName: game-server-tls
+  rules:
+    - host: eu.neon-beat.app
+      http:
+        paths:
+          # API temps reel et REST du backend (toutes portent ?game_id=...).
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: game-server
+                port:
+                  number: 80

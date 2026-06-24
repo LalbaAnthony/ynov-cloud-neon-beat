@@ -1,0 +1,21 @@
+# Base Kustomize : socle commun a toutes les regions.
+# Les overlays regionaux (overlays/eu-west, us-east, ap-southeast) referencent
+# cette base et appliquent les specificites locales (region, hote, secret DB).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 00-namespaces.yaml
+  - game-server
+  - lobby
+  - redis
+  - ingress
+  - networkpolicies
+  - monitoring
+
+# Etiquettes communes appliquees a toutes les ressources.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: neon-beat
+      app.kubernetes.io/managed-by: kustomize

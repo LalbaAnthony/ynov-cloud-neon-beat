@@ -1,0 +1,24 @@
+# Le lobby est sans etat : un HPA CPU classique suffit.
+# (Contrairement au game-server, sa charge est proportionnelle au CPU.)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lobby
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: lobby
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lobby
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

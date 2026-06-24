@@ -1,0 +1,99 @@
+# Politiques reseau : modele "deny par defaut" puis ouverture explicite des flux
+# necessaires. Reduit la surface d'attaque et le rayon d'explosion en cas de
+# compromission d'un pod.
+
+# 1. Refus par defaut de tout trafic entrant dans neon-game.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: neon-game
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+# 2. game-server : accepte le trafic HTTP uniquement depuis le controleur d'entree
+#    et depuis Prometheus (scrape /metrics).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: game-server-ingress
+  namespace: neon-game
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: game-server
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: neon-ingress
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: neon-observability
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# 3. game-server : sorties autorisees -> Redis, DNS, et MongoDB externe (443/27017).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: game-server-egress
+  namespace: neon-game
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: game-server
+  policyTypes: ["Egress"]
+  egress:
+    # Resolution DNS interne.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Registre/pub-sub Redis.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: neon-data
+      ports:
+        - protocol: TCP
+          port: 6379
+    # MongoDB Atlas (hors cluster) : TLS 27017 et 443.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 27017
+        - protocol: TCP
+          port: 443
+---
+# 4. lobby : accepte le trafic depuis l'Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lobby-ingress
+  namespace: neon-game
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lobby
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: neon-ingress
+      ports:
+        - protocol: TCP
+          port: 8090

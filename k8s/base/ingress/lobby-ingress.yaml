@@ -1,0 +1,32 @@
+# Ingress du lobby (plan de controle global).
+# Expose sur un hote "api" resolu par DNS geographique vers la region la plus proche.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lobby
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: lobby
+    app.kubernetes.io/part-of: neon-beat
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://*.neon-beat.app"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.neon-beat.app
+      secretName: lobby-tls
+  rules:
+    - host: api.neon-beat.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lobby
+                port:
+                  number: 80

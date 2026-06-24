@@ -1,0 +1,94 @@
+# Dashboard Grafana provisionne automatiquement via le sidecar de
+# kube-prometheus-stack (label grafana_dashboard=1).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neon-beat-dashboard
+  namespace: neon-observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: neon-beat
+data:
+  neon-beat.json: |
+    {
+      "title": "Neon Beat - Temps reel & capacite",
+      "uid": "neon-beat-overview",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "15s",
+      "templating": {
+        "list": [
+          {
+            "name": "region",
+            "type": "query",
+            "datasource": "Prometheus",
+            "query": "label_values(neon_active_games, region)",
+            "includeAll": true,
+            "multi": true
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Connexions temps reel (WS + SSE) par region",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "sum(neon_ws_connections{region=~\"$region\"}) by (region)", "legendFormat": "WS {{region}}"},
+            {"expr": "sum(neon_sse_clients{region=~\"$region\"}) by (region)", "legendFormat": "SSE {{region}}"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Parties actives par region",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {"expr": "sum(neon_active_games{region=~\"$region\"}) by (region)", "legendFormat": "{{region}}"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Latence de buzz p99 (s)",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.4}]}}},
+          "targets": [
+            {"expr": "neon:buzz_latency_seconds:p99{region=~\"$region\"}", "legendFormat": "{{region}}"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Pods game-server (desire vs disponible)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {"expr": "kube_deployment_spec_replicas{deployment=\"game-server\"}", "legendFormat": "desire"},
+            {"expr": "kube_deployment_status_replicas_available{deployment=\"game-server\"}", "legendFormat": "available"}
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Taux d'erreur 5xx",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.02}]}}},
+          "targets": [
+            {"expr": "sum(neon:http_error_ratio:ratio5m{region=~\"$region\"})", "legendFormat": "5xx"}
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Saturation fleet (% du plafond)",
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.7}, {"color": "red", "value": 0.85}]}}},
+          "targets": [
+            {"expr": "sum(neon_active_games{region=~\"$region\"}) / (count(up{job=\"game-server\"} == 1) * 50)", "legendFormat": "saturation"}
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Mode degrade DB",
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 16},
+          "targets": [
+            {"expr": "max(neon_storage_degraded{region=~\"$region\"})", "legendFormat": "degraded"}
+          ]
+        }
+      ]
+    }

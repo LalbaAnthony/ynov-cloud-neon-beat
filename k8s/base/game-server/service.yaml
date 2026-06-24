@@ -1,0 +1,23 @@
+# Service ClusterIP du game-server.
+# headless=false : on garde un VIP stable, mais le routage par partie (affinite)
+# est realise en amont par l'Ingress (hash sur game_id), pas par ce Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-server
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: game-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  # Tolerance accrue aux montees en charge : on ne casse pas les sessions etablies
+  # vers un pod qui reste pret.
+  publishNotReadyAddresses: false

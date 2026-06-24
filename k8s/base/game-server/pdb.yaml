@@ -1,0 +1,16 @@
+# Budget de disruption : garantit qu'au moins 75% des pods restent disponibles
+# pendant les operations volontaires (drain de noeud, upgrade du cluster).
+# Protege la continuite des parties en cours lors des maintenances.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: game-server
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  minAvailable: 75%
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: game-server

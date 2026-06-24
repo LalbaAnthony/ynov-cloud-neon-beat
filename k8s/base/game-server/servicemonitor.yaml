@@ -1,0 +1,30 @@
+# ServiceMonitor : indique a Prometheus (operator kube-prometheus-stack) de
+# scraper l'endpoint /metrics de chaque pod game-server.
+#
+# Prerequis applicatif : le backend doit exposer /metrics au format Prometheus
+# (compteurs neon_active_games, neon_ws_connections, neon_sse_clients,
+# neon_buzz_latency_seconds, etc.). Voir docs/architecture.md (section Supervision).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: game-server
+  namespace: neon-observability
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["neon-game"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: game-server
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        # On propage la region pour pouvoir agreger/filtrer par zone geographique.
+        - sourceLabels: [__meta_kubernetes_pod_label_topology_kubernetes_io_region]
+          targetLabel: region

@@ -1,0 +1,68 @@
+# Autoscaling du game-server via KEDA.
+#
+# Pourquoi KEDA et pas un HPA CPU classique ? La charge est dominee par le nombre
+# de connexions longues (WS/SSE) et de parties hebergees, pas par le CPU. Un HPA
+# sur le CPU sous-estimerait la pression (un pod peut tenir des milliers de
+# connexions quasi inactives a faible CPU) et provoquerait des coupures.
+# On scale donc sur des metriques metier exposees par /metrics (Prometheus).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: game-server
+  namespace: neon-game
+  labels:
+    app.kubernetes.io/name: game-server
+    app.kubernetes.io/part-of: neon-beat
+spec:
+  scaleTargetRef:
+    name: game-server
+  minReplicaCount: 3        # Socle chaud : absorbe les pics brusques sans cold start.
+  maxReplicaCount: 60       # Plafond regional (cf. capacity-planning.md).
+  cooldownPeriod: 300       # Anti-flapping : on attend avant de scaler a la baisse.
+  fallback:
+    # Si Prometheus est injoignable, on degrade vers une capacite de securite.
+    failureThreshold: 3
+    replicas: 10
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Descente prudente : les connexions ne se reequilibrent pas toutes seules,
+          # chaque pod retire doit drainer ses parties. On limite donc le rythme.
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+        scaleUp:
+          # Montee reactive face aux pics de joueurs.
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 30
+            - type: Pods
+              value: 5
+              periodSeconds: 30
+          selectPolicy: Max
+  triggers:
+    # Declencheur principal : nombre moyen de parties actives par pod.
+    # Cible 40 parties/pod (plafond dur applicatif a 50 -> 20% de marge).
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.neon-observability.svc.cluster.local:9090
+        metricName: neon_active_games_per_pod
+        query: |
+          sum(neon_active_games{namespace="neon-game"})
+          / count(up{job="game-server", namespace="neon-game"} == 1)
+        threshold: "40"
+    # Declencheur secondaire : connexions temps reel moyennes par pod.
+    # Garde-fou memoire (~2000 connexions/pod).
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.neon-observability.svc.cluster.local:9090
+        metricName: neon_realtime_conns_per_pod
+        query: |
+          sum(neon_ws_connections{namespace="neon-game"} + neon_sse_clients{namespace="neon-game"})
+          / count(up{job="game-server", namespace="neon-game"} == 1)
+        threshold: "1600"

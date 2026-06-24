@@ -1,0 +1,38 @@
+# Overlay region EU-Ouest (cluster dedie, ex : GKE/EKS europe-west1).
+# Applique la base commune puis injecte les specificites locales :
+#   - region logique propagee a l'appli et aux metriques ;
+#   - hote public de l'Ingress ;
+#   - URI MongoDB pointant sur la zone EU du cluster Atlas global.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  # Region logique (env + label de pod pour l'agregation des metriques).
+  - target:
+      kind: ConfigMap
+      name: game-server-config
+    patch: |
+      - op: replace
+        path: /data/NEON_REGION
+        value: "eu-west"
+  - target:
+      kind: Deployment
+      name: game-server
+    patch: |
+      - op: add
+        path: /spec/template/metadata/labels/topology.kubernetes.io~1region
+        value: "eu-west"
+  # Hote public regional.
+  - target:
+      kind: Ingress
+      name: game-server
+    patch: |
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: "eu.neon-beat.app"
+      - op: replace
+        path: /spec/rules/0/host
+        value: "eu.neon-beat.app"
