@@ -64,9 +64,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ["ALL"]
----
-apiVersion: v1
+              drop: ["ALL"]apiVersion: v1
 kind: Service
 metadata:
   name: redis

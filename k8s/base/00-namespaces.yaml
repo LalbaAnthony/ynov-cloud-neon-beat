@@ -9,27 +9,21 @@ metadata:
     # Couche temps reel (game-server + lobby) : c'est le coeur stateful du systeme.
     app.kubernetes.io/part-of: neon-beat
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/warn: restricted
----
-apiVersion: v1
+    pod-security.kubernetes.io/warn: restrictedapiVersion: v1
 kind: Namespace
 metadata:
   name: neon-data
   labels:
     # Couche donnees regionale (Redis de registre/pub-sub, proxys DB).
     app.kubernetes.io/part-of: neon-beat
-    pod-security.kubernetes.io/enforce: restricted
----
-apiVersion: v1
+    pod-security.kubernetes.io/enforce: restrictedapiVersion: v1
 kind: Namespace
 metadata:
   name: neon-observability
   labels:
     # Stack de supervision (Prometheus, Grafana, Loki, Tempo, Alertmanager).
     app.kubernetes.io/part-of: neon-beat
-    pod-security.kubernetes.io/enforce: baseline
----
-apiVersion: v1
+    pod-security.kubernetes.io/enforce: baselineapiVersion: v1
 kind: Namespace
 metadata:
   name: neon-ingress

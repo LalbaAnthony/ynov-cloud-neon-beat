@@ -19,8 +19,6 @@ Rapport d'architecture pour le passage de Neon Beat d'un déploiement *On Premis
 13. [Évolutions nécessaires côté applicatif](#13-évolutions-nécessaires-côté-applicatif)
 14. [Synthèse des choix](#14-synthèse-des-choix)
 
----
-
 ## 1. Analyse du problème
 
 ### 1.1 Le besoin
@@ -48,8 +46,6 @@ Le défi n'est pas le volume de calcul (1 *blindtest consomme peu de CPU en soit
 ### 1.3 Reformulation
 
 Concevoir une plateforme qui héberge **un grand nombre de parties indépendantes** (multi-tenant), réparties **par région** pour minimiser la latence, où **chaque partie vit sur un pod unique** mais où **la perte de ce pod n'entraîne pas la perte de la partie**.
-
----
 
 ## 2. Rappel de l'application existante
 
@@ -82,8 +78,6 @@ pub struct AppState {
 Élément favorable, en revanche : le backend persiste l'état de la partie en continu en base (écritures *debouncées* à 200 ms, *retry* optimiste, *flush* à l'arrêt).
 Une partie peut donc être **rechargée** depuis la base après un redémarrage. Cette propriété est la clé qui rend le modèle "stateful" tolérant aux pannes dans le cloud.
 
----
-
 ## 3. Identification des points critiques
 
 | #   | Point critique                                      | Conséquence                                                                                            | Réponse architecturale                                                                              |
@@ -96,8 +90,6 @@ Une partie peut donc être **rechargée** depuis la base après un redémarrage.
 | C6  | **Dépendance base de données**                      | Mode dégradé si la DB est injoignable                                                                  | Persistance régionale, *probes* de *readiness*, mode dégradé déjà géré par le backend               |
 | C7  | **CORS permissif, pas d'authentification publique** | Surface d'attaque, abus possibles (spam de buzz)                                                       | Verrouillage CORS au bord, *rate limiting*, WAF, NetworkPolicies                                    |
 | C8  | **Perte d'un pod = perte d'une partie ?**           | Interruption de jeu                                                                                    | Rechargement depuis le dernier *checkpoint* en base (perte <= 200 ms)                               |
-
----
 
 ## 4. Principes directeurs et choix structurants
 
@@ -150,8 +142,6 @@ On retient **MongoDB** (le backend supporte `mongo-store` ou `couch-store`) :
   considéré : intéressant pour le *offline-first*, mais sa résolution de conflits
   multi-maître complique l'ancrage régional strict et apporte peu ici puisque chaque
   partie n'est écrite que par un seul pod à la fois.
-
----
 
 ## 5. Architecture cible
 
@@ -277,8 +267,6 @@ sequenceDiagram
     P-->>J: motif LED (pattern) + flux temps réel
 ```
 
----
-
 ## 6. Choix des composants Kubernetes
 
 | Besoin                                | Composant retenu                                                           | Justification                                                                                                                                                                                     |
@@ -301,8 +289,6 @@ sequenceDiagram
 
 > Détail des manifestes : voir `k8s/base/` (ressources communes) et
 > `k8s/overlays/<région>/` (spécialisations régionales).
-
----
 
 ## 7. Gestion du temps réel
 
@@ -348,8 +334,6 @@ Les protocoles prévoient déjà la reconnexion (ré-identification du buzzer, *
 restaurés ; *handshake* SSE rejoué). En cas de bascule de pod (déploiement, panne),
 le client se reconnecte, l'Ingress le re-route vers le nouveau pod hôte, qui **a
 rechargé la partie depuis la base**. La continuité de jeu est préservée.
-
----
 
 ## 8. Scalabilité et dimensionnement
 
@@ -404,8 +388,6 @@ flowchart LR
 Hors pic, le socle chaud (3 pods/région) + le Cluster Autoscaler permettent de
 réduire fortement le nombre de noeuds. Les 100 000 joueurs/semaine ne sont jamais
 simultanés : l'autoscaling suit la courbe d'usage réelle (soirées, week-ends).
-
----
 
 ## 9. Résilience et continuité de service
 
@@ -462,8 +444,6 @@ Les `topologySpreadConstraints` (clé `topology.kubernetes.io/zone`) et l'anti-a
 par hôte garantissent qu'une partie ne dépend pas d'une AZ unique et qu'une *fleet*
 n'est jamais concentrée sur un seul noeud.
 
----
-
 ## 10. Base de données multi-région
 
 ```mermaid
@@ -488,8 +468,6 @@ flowchart TB
 - Le backend gère déjà l'amortissement des écritures (*debounce* 200 ms, *retry*
   optimiste) : la DB n'est jamais saturée par les rafales de buzz/scores.
 
----
-
 ## 11. Sécurité
 
 Défense en profondeur, du bord vers le coeur :
@@ -509,8 +487,6 @@ Défense en profondeur, du bord vers le coeur :
 
 > Option avancée : *service mesh* (Linkerd/Istio) pour mTLS intra-cluster si la
 > conformité l'exige. Écarté par défaut pour ne pas alourdir le chemin temps réel.
-
----
 
 ## 12. Supervision
 
@@ -554,8 +530,6 @@ Grafana provisionné via `k8s/base/monitoring/grafana-dashboard.yaml`.
 Le backend doit exposer un endpoint **`/metrics`** au format Prometheus (cf. section
 suivante). C'est la seule brique de supervision manquante côté code.
 
----
-
 ## 13. Évolutions nécessaires côté applicatif
 
 L'architecture cloud est prête à déployer, mais elle suppose deux évolutions
@@ -576,8 +550,6 @@ Tant que A1 n'est pas livré, la plateforme reste déployable en mode **"une par
 pod"** (le hachage par `game_id` envoie chaque partie sur un pod ; la densité est
 simplement plus faible). La migration vers le multi-parties est donc **incrémentale**
 et sans rupture.
-
----
 
 ## 14. Synthèse des choix
 

@@ -10,9 +10,7 @@ metadata:
   namespace: neon-game
 spec:
   podSelector: {}
-  policyTypes: ["Ingress"]
----
-# 2. game-server : accepte le trafic HTTP uniquement depuis le controleur d'entree
+  policyTypes: ["Ingress"]# 2. game-server : accepte le trafic HTTP uniquement depuis le controleur d'entree
 #    et depuis Prometheus (scrape /metrics).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -38,9 +36,7 @@ spec:
               kubernetes.io/metadata.name: neon-observability
       ports:
         - protocol: TCP
-          port: 8080
----
-# 3. game-server : sorties autorisees -> Redis, DNS, et MongoDB externe (443/27017).
+          port: 8080# 3. game-server : sorties autorisees -> Redis, DNS, et MongoDB externe (443/27017).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -76,9 +72,7 @@ spec:
         - protocol: TCP
           port: 27017
         - protocol: TCP
-          port: 443
----
-# 4. lobby : accepte le trafic depuis l'Ingress.
+          port: 443# 4. lobby : accepte le trafic depuis l'Ingress.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
