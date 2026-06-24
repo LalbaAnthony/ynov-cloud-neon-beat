@@ -95,53 +95,36 @@ Une partie peut donc être **rechargée** depuis la base après un redémarrage.
 
 ### 4.1 Modèle de scaling : "sharding par partie" plutôt que réplication
 
-Le scaling horizontal classique (N pods identiques derrière un load balancer
-*round-robin*) **ne fonctionne pas** ici : l'état d'une partie n'existe que sur un
-pod. On adopte donc un modèle de **sharding par partie** :
+Le scaling horizontal classique (N pods identiques derrière un load balancer) ne fonctionne pas ici : l'état d'une partie n'existe que sur un pod.
 
-- chaque partie est **épinglée** à un pod pour toute sa durée ;
-- le routage utilise un **hachage consistant** (`ketama`) sur l'identifiant de
-  partie : `game_id -> pod`. Tout le trafic d'une partie (REST + WS + SSE) converge
-  vers le même pod ;
-- le hachage consistant garantit qu'un *scale up/down* ne remappe qu'une **fraction**
-  des parties (et non l'ensemble), limitant les reconnexions.
+On adopte donc un modèle de sharding par partie :
+- chaque partie est épinglée à un pod pour toute sa durée ;
+- le routage utilise un hachage consistant (`ketama`) sur l'identifiant de partie : `game_id -> pod`. Tout le trafic d'une partie (REST + WS + SSE) converge vers le même pod ;
+- le hachage consistant garantit qu'un *scale up/down* ne remappe qu'une fraction des parties (et non l'ensemble), limitant les reconnexions.
 
 ### 4.2 Deux alternatives écartées (et pourquoi)
 
-| Option                                                                   | Description                                       | Pourquoi écartée                                                                                                                                                 |
-| ------------------------------------------------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pod par partie (type Agones)**                                         | Un pod dédié créé à la demande pour chaque partie | Gaspillage massif : une partie ne porte que ~4 à 20 joueurs ; 1 250 parties = 1 250 pods. Cold start à chaque création. Surcoût d'orchestration disproportionné. |
-| **Backend *stateless* + état partagé (Redis/DB pour tout l'état chaud)** | Externaliser toute la machine à états dans Redis  | Réécriture lourde du backend ; ajoute une latence réseau sur le chemin critique du buzz ; perd l'avantage de l'arbitrage local instantané.                       |
+| Option                                                               | Description                                       | Pourquoi écartée                                                                                                                                                 |
+| -------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pod par partie (type Agones)                                         | Un pod dédié créé à la demande pour chaque partie | Gaspillage massif : une partie ne porte que ~4 à 20 joueurs ; 1 250 parties = 1 250 pods. Cold start à chaque création. Surcoût d'orchestration disproportionné. |
+| Backend *stateless* + état partagé (Redis/DB pour tout l'état chaud) | Externaliser toute la machine à états dans Redis  | Réécriture lourde du backend ; ajoute une latence réseau sur le chemin critique du buzz ; perd l'avantage de l'arbitrage local instantané.                       |
 
--> Le **sharding par partie avec backend multi-parties** est le meilleur compromis :
-densité correcte (plusieurs dizaines de parties par pod), latence d'arbitrage
-minimale (tout en mémoire locale), évolution backend modérée.
+-> Le sharding par partie avec backend multi-parties est le meilleur compromis : densité correcte (plusieurs dizaines de parties par pod), latence d'arbitrage minimale (tout en mémoire locale).
 
 ### 4.3 Ancrage régional des parties
 
-Une partie est **ancrée** à la région de son créateur (le GM). Les joueurs qui la
-rejoignent sont dirigés vers cette région. Conséquences :
+Une partie est ancrée à la région de son créateur (le GM).
 
+Les joueurs qui la rejoignent sont dirigés vers cette région. Conséquences :
 - la majorité des parties regroupent des joueurs proches -> latence faible ;
-- un joueur isolé qui rejoint une partie distante accepte la latence inhérente vers
-  la région d'ancrage, c'est physiquement incompressible et c'est le bon compromis
-  (l'arbitrage reste cohérent car centralisé sur un seul pod) ;
-- les régions sont **indépendantes** : la panne d'une région n'affecte pas les
-  autres (cloisonnement des défaillances).
+- un joueur isolé qui rejoint une partie distante accepte la latence vers la région d'ancrage
+- les régions sont indépendantes : la panne d'une région n'affecte pas les autres
 
 ### 4.4 Choix de la base de données
 
-On retient **MongoDB** (le backend supporte `mongo-store` ou `couch-store`) :
-
-- **MongoDB Atlas Global Cluster** avec *zone sharding* permet d'ancrer
-  physiquement les données d'une partie dans la région du joueur (résidence et
-  localité des données) ;
-- outillage managé mature (sauvegardes, *failover*, observabilité) adapté à
-  l'échelle visée ;
-- *CouchDB* (multi-maître, réplication par réplication de documents) a été
-  considéré : intéressant pour le *offline-first*, mais sa résolution de conflits
-  multi-maître complique l'ancrage régional strict et apporte peu ici puisque chaque
-  partie n'est écrite que par un seul pod à la fois.
+On retient **MongoDB** (le backend supporte `mongo-store`) :
+- MongoDB Atlas Global Cluster avec zone sharding permet d'ancrer physiquement les données d'une partie dans la région du joueur 
+- CouchDB (multi-maître, réplication par réplication de documents) a été considéré : intéressant pour le offline-first, mais sa résolution de conflits complique l'ancrage régional strict et apporte peu ici puisque chaque partie n'est écrite que par un seul pod à la fois.
 
 ## 5. Architecture cible
 
@@ -196,9 +179,8 @@ flowchart TB
 
 **Lecture :** le DNS géographique route chaque client vers la région la plus proche.
 Les SPA sont servies par un CDN (latence minimale, déchargement total des clusters).
-Le *lobby* (plan de contrôle global) indique à un client rejoignant une partie
-**quelle région** contacter. À l'intérieur de chaque région, l'Ingress route par
-`game_id` vers le bon pod.
+Le *lobby* (plan de contrôle global) indique à un client rejoignant une partie quelle région contacter.
+À l'intérieur de chaque région, l'Ingress route par `game_id` vers le bon pod.
 
 ### 5.2 Vue d'une région
 
@@ -300,9 +282,7 @@ sequenceDiagram
 | `/sse/public` | SSE       | serveur -> client | Écrans / game front | Pas de *buffering* proxy, *keep-alive*                              |
 | `/sse/admin`  | SSE       | serveur -> client | Console GM          | Idem + connexion unique par partie                                  |
 
-L'Ingress est configuré en conséquence (cf. `k8s/base/ingress/ingress.yaml`) :
-`proxy-read-timeout: 7200` (une partie dure jusqu'à 2 h), `proxy-buffering: off`
-(diffusion SSE immédiate), gestion native de l'*upgrade* WebSocket.
+L'Ingress est configuré en conséquence (cf. `k8s/base/ingress/ingress.yaml`) : `proxy-read-timeout: 7200` (une partie dure jusqu'à 2 h), `proxy-buffering: off` (diffusion SSE immédiate), gestion native de l'*upgrade* WebSocket.
 
 ### 7.2 Affinité de partie = arbitrage local incontestable
 
